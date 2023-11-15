@@ -1,47 +1,28 @@
-import gym
-import time
-import numpy as np
-from Q_learning import QLearningAgent
+from Q_learning import QLearningAgent, evaluate_policy
+from torch.utils.tensorboard import SummaryWriter # used to plot training curve
+from gymnasium.wrappers import TimeLimit
 from datetime import datetime
+import gymnasium as gym
+import numpy as np
 import os, shutil
-from torch.utils.tensorboard import SummaryWriter
 
-
-def evaluate_policy(env, model, render, steps_per_epoch=100):
-    s, done, ep_r, steps = env.reset(), False, 0, 0
-    while not (done or (steps >= steps_per_epoch)):
-        # Take deterministic actions at test time
-        a = model.predict(s)
-        s_prime, r, done, info = env.step(a)
-
-        ep_r += r
-        steps += 1
-        s = s_prime
-        if render:
-            env.render()
-    return ep_r
 
 def main():
-
-    write = True #Use SummaryWriter or not
+    write = True # whether use SummaryWriter to record training curve
     Loadmodel = False #Load model or not
+    Max_train_steps = 20000
+    seed = 0
+    np.random.seed(seed)
+    print(f"Random Seed: {seed}")
 
+    ''' ↓↓↓ Build Env ↓↓↓ '''
     EnvName = "CliffWalking-v0"
     env = gym.make(EnvName)
-    Env_With_dw = True #Env Like CliffWalking has dw(die&win) signal
+    env = TimeLimit(env, max_episode_steps=500)
     eval_env = gym.make(EnvName)
-    max_e_steps = 500 #max episode steps
+    eval_env = TimeLimit(eval_env, max_episode_steps=100)
 
-    Max_train_steps = 20000
-    save_interval = 1e10 #in steps
-    eval_interval = 100 #in steps
-
-    random_seed = 0
-    print("Random Seed: {}".format(random_seed))
-    env.seed(random_seed)
-    eval_env.seed(random_seed)
-    np.random.seed(random_seed)
-
+    ''' ↓↓↓ Use tensorboard to record training curves ↓↓↓ '''
     if write:
         #Use SummaryWriter to record the trainig
         timenow = str(datetime.now())[0:-7]
@@ -52,40 +33,43 @@ def main():
 
     ''' ↓↓↓ Build Q-learning Agent ↓↓↓ '''
     if not os.path.exists('model'): os.mkdir('model')
-    model = QLearningAgent(
-        env_with_dw=Env_With_dw,
+    agent = QLearningAgent(
         s_dim=env.observation_space.n,
         a_dim=env.action_space.n,
         lr=0.2,
         gamma=0.9,
         exp_noise=0.1)
-    if Loadmodel: model.restore()
+    if Loadmodel: agent.restore()
 
     ''' ↓↓↓ Iterate and Train ↓↓↓ '''
     total_steps = 0
     while total_steps < Max_train_steps:
-        s, done, steps = env.reset(), False, 0
+        s, info = env.reset(seed=seed)
+        seed += 1
+        done, steps = False, 0
 
-        while not (done or steps>max_e_steps):
+        while not done:
             steps += 1
-            a = model.select_action(s)
-            s_, r, done, _ = env.step(a)
+            a = agent.select_action(s, deterministic=False)
+            s_next, r, dw, tr, info = env.step(a)
+            agent.train(s, a, r, s_next, dw)
 
-            model.train(s, a, r, s_, done)
-            s = s_
+            done = (dw or tr)
+            s = s_next
 
-            '''record & log'''
-            if total_steps % eval_interval == 0:
-                score = evaluate_policy(eval_env, model, False)
-                if write:
-                    writer.add_scalar('ep_r', score, global_step=total_steps)
-                print('EnvName:',EnvName,'seed:',random_seed,'steps: {}'.format(total_steps),'score:', score)
             total_steps += 1
+            '''record & log'''
+            if total_steps % 100 == 0:
+                ep_r = evaluate_policy(eval_env, agent)
+                if write: writer.add_scalar('ep_r', ep_r, global_step=total_steps)
+                print(f'EnvName:{EnvName}, Seed:{seed}, Steps:{total_steps}, Episode reward:{ep_r}')
 
             '''save model'''
-            if total_steps % save_interval==0:
-                model.save()
+            if total_steps % Max_train_steps==0:
+                agent.save()
+
     env.close()
+    eval_env.close()
 
 if __name__ == '__main__':
     main()

@@ -1,48 +1,53 @@
 import numpy as np
 
-class QLearningAgent(object):
-    def __init__(self, env_with_dw, s_dim, a_dim, lr=0.01, gamma=0.9, exp_noise=0.1):
-        self.env_with_dw = env_with_dw
+class QLearningAgent():
+    def __init__(self, s_dim, a_dim, lr=0.01, gamma=0.9, exp_noise=0.1):
         self.a_dim = a_dim
         self.lr = lr
         self.gamma = gamma
         self.epsilon = exp_noise
         self.Q = np.zeros((s_dim, a_dim))
 
-    def select_action(self,s):
-        '''e-greedy policy'''
-        if np.random.uniform(0, 1) < self.epsilon:
-            a = np.random.choice(self.a_dim)
+    def select_action(self,s, deterministic):
+        if deterministic:
+            '''deterministic policy'''
+            return np.argmax(self.Q[s, :])
         else:
-            a = self.predict(s)
-        return a
+            '''e-greedy policy'''
+            if np.random.uniform(0, 1) < self.epsilon:
+                return np.random.choice(self.a_dim) # e-greedy action
+            else:
+                return np.argmax(self.Q[s, :])
 
-    def predict(self, s):
-        '''Deterministic policy'''
-        Q_s = self.Q[s, :]
-        maxQ = np.max(Q_s)
-        action_list = np.where(Q_s == maxQ)[0]
-        a = np.random.choice(action_list)
-        return a
-
-
-    # Update Q table
-    def train(self, s, a, r, s_, done):
+    def train(self, s, a, r, s_next, dw):
+        '''Update Q table'''
         Q_sa = self.Q[s, a]
-        if self.env_with_dw:
-            target_Q = r + (1-done)*self.gamma * np.max(self.Q[s_, :])
-        else:
-            target_Q = r + self.gamma * np.max(self.Q[s_, :])
+        target_Q = r + (1 - dw) * self.gamma * np.max(self.Q[s_next, :])
         self.Q[s, a] += self.lr * (target_Q - Q_sa)
 
-
-    #save Q table
     def save(self):
+        '''save Q table'''
         npy_file = 'model/q_table.npy'
         np.save(npy_file, self.Q)
         print(npy_file + ' saved.')
 
-    #load Q table
     def restore(self, npy_file='model/q_table.npy'):
+        '''load Q table'''
         self.Q = np.load(npy_file)
         print(npy_file + ' loaded.')
+
+
+
+def evaluate_policy(env, agent):
+    s, info = env.reset()
+    done, ep_r, steps = False, 0, 0
+    while not done:
+        # Take deterministic actions at test time
+        a = agent.select_action(s, deterministic=True)
+        s_next, r, dw, tr, info = env.step(a)
+        done = (dw or tr)
+
+        ep_r += r
+        steps += 1
+        s = s_next
+    return ep_r
