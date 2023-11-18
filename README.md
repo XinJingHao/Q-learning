@@ -13,7 +13,10 @@ python==3.11.5
 ```
 
 ## How to use my code
-Just run **'python main.py'**.   
+Just run
+```
+python main.py
+```
 
 
 ### Visualize the training curve
